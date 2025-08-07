@@ -1,6 +1,7 @@
 import os, time
 import tkinter as tk
 from PIL import Image, ImageTk
+from collections import OrderedDict
 
 
 class VIMageSorterApp:
@@ -41,24 +42,35 @@ class VIMageSorterApp:
         )
         self._file_area.pack(expand=True, fill="both")
 
+        # File path
+        self._path_label = tk.Label(
+            self._file_area,
+            text="",
+            bg=self._bg,
+            fg=self._mainc,
+            font=self._sml_font,
+        )
+        self._path_label.pack(side="bottom", fill="x", padx=5, pady=3)
+
         self._canvas = tk.Canvas(
             self._file_area,
             bg=self._bg,
             highlightthickness=0,
         )
-        self._canvas.pack(expand=True, fill="both")
+        self._canvas.pack(side="left", expand=True, fill="both")
 
         # Draw canvas placeholder
         self._draw_canvas_placeholder()
 
         # Info frame
-        self._info_frame = tk.Frame(self._file_area, bg=self._bg)
+        self._info_frame = tk.Frame(self._file_area, bg=self._bg, width=280)
         self._info_frame.pack(
             side="right",
             fill="y",
             padx=5,
             pady=5,
         )
+        self._info_frame.pack_propagate(False)
 
         # Labels
         self._size_label = tk.Label(
@@ -109,28 +121,21 @@ class VIMageSorterApp:
         self._cmd_frame.pack(side="bottom", fill="x")
         self._cmd_frame.pack_forget()
         
-        # File path
-        self._path_label = tk.Label(
-            self._file_area,
-            text="",
-            bg=self._bg,
-            fg=self._mainc,
-            font=self._sml_font,
-        )
-        self._path_label.pack(side="bottom", fill="x", padx=5, pady=3)
-
+        
         # Bind keys
         self.root.bind("<Configure>", self._on_resize)
         self.root.bind("<Key>", self._on_keypress)
-        self.root.bind("r", self._rotate_img)
-        self.root.bind("u", self._undo)
-        self.root.bind("d", self._delete_file)
-        self.root.bind("n", self._skip)
-        self.root.bind("o", lambda event: self._display_img("/home/auggie/library/inbox/downloads/wallpaper.jpg"))
+        self.root.bind("R", self._rotate_img)
+        self.root.bind("U", self._undo)
+        self.root.bind("D", self._delete_file)
+        self.root.bind("N", self._skip)
         self._cmd_entry.bind("<Return>", self._on_cmd_enter)
         self._cmd_entry.bind("<Escape>", self._on_cmd_escape)
 
         self.in_cmd_mode = False
+        self.folder_path = None
+        self.files = []
+        self._actions = OrderedDict()
 
     def _update_status_text(self):
         text = (f"Done: {self.done_count}/{self.left_count}\t\tImages: {self.image_count} | Videos: {self.video_count}")
@@ -138,9 +143,6 @@ class VIMageSorterApp:
         self._status_var.set(text)
 
     def _draw_canvas_placeholder(self):
-        if hasattr(self, '_cur_img'):
-            return
-
         self._canvas.delete("all")
         w = self._canvas.winfo_width() or 800
         h = self._canvas.winfo_height() or 600
@@ -168,8 +170,8 @@ class VIMageSorterApp:
         )
 
     def _on_resize(self, event):
-        if hasattr(self, "_cur_img"):
-            self._display_img("/home/auggie/library/inbox/downloads/wallpaper.jpg")
+        if getattr(self, "_cur_img", None) != None:
+            self._display_img()
 
         else:
             self._draw_canvas_placeholder()
@@ -195,38 +197,151 @@ class VIMageSorterApp:
     def _on_cmd_enter(self, event):
         cmd_text = self._cmd_entry.get().strip()
         print(f"Cmd entered: {cmd_text}")
+        params = cmd_text.split(" ")
+
+        if params[0] in ["quit", "q"]:
+            self._quit()
+
+        elif params[0] in ["save", "write", "s", "w"]:
+            self._save()
+
+        elif params[0] in ["wq"]:
+            self._save()
+            self._quit()
+
+        elif params[0] in ["open", "o"]:
+            self.folder_path = os.path.expanduser(params[1])
+            if not os.path.exists(self.folder_path):
+                print(f"ERROR: {self.folder_path} does not exists")
+                self.folder_path = None
+
+            self.left_count = 0
+            self.done_count = 0
+            self.image_count = 0
+            self.video_count = 0
+            self.files = []
+            for root, dirs, files in os.walk(self.folder_path):
+                for name in files:
+                    if os.path.splitext(name)[1].lstrip('.') not in ["png", "jpg", "jpeg", "webp", "gif"]:
+                        continue
+                    self.files.append(os.path.join(root, name))
+
+            self.left_count = len(self.files)
+            self.image_count = len(self.files)
+            self.done_count = 0
+            self.cur_file = self.files[self.done_count]
+            self._display_img(force=True)
+            self._update_status_text()
+            self._register_action()
+
         self._exit_cmd_mode()
 
     def _on_cmd_escape(self, event):
         self._exit_cmd_mode()
 
+    def _register_action(self, action=None):
+        if not self.cur_file in self._actions:
+            self._actions[self.cur_file] = []
+
+        if action:
+            self._actions[self.cur_file].append(action)
+
+        print(self._actions)
+
     def _rotate_img(self, event):
         if self.in_cmd_mode:
             return
 
-        print("Rotate action triggered")
+        self._register_action("rotate")
+
+        self._rotate_display_img()
 
     def _undo(self, event):
         if self.in_cmd_mode:
             return
 
         print("Undo action triggered")
+        print(self.cur_file)
+        if len(self._actions) == 1 and len(self._actions[self.cur_file]) == 0:
+            return
+
+        if self.cur_file == None:
+            self.done_count -= 1
+            self.cur_file = self.files[self.done_count]
+            self._display_img(force=True)
+            self._update_status_text()
+            for action in self._actions[self.cur_file]:
+                if action == "rotate":
+                    self._rotate_display_img()
+
+        elif len(self._actions[self.cur_file]) == 0:
+            self._actions.popitem()
+            self.done_count -= 1
+            self.cur_file = self.files[self.done_count]
+            self._display_img(force=True)
+            self._update_status_text()
+            for action in self._actions[self.cur_file]:
+                if action == "rotate":
+                    self._rotate_display_img()
+
+        if self._actions[self.cur_file][-1] == "rotate":
+            self._actions[self.cur_file].pop()
+            self._rotate_display_img(reverse=True)
+
+        elif self._actions[self.cur_file][-1] == "delete":
+            self._actions[self.cur_file].pop()
+
+        print(self._actions)
 
     def _delete_file(self, event):
         if self.in_cmd_mode:
             return
 
-        print("Delete action triggered")
+        if len(self.files) == self.done_count + 1:
+            self._register_action("delete")
+            self.done_count = len(self.files)
+            self._cur_img = None
+            self.cur_file = None
+            self._draw_canvas_placeholder()
+            self._path_label.config(text="")
+            self._size_label.config(text="Size:")
+            self._type_label.config(text="Type:")
+            self._res_label.config(text="Resolution:")
+            self._created_dt_label.config(text="Created:")
+        
+        elif len(self.files) > self.done_count + 1:
+            self._register_action("delete")
+            self.done_count += 1
+            self.cur_file = self.files[self.done_count]
+            self._display_img(force=True)
+            self._register_action()
+        
+        self._update_status_text()
+        print(self.cur_file)
 
     def _skip(self, event):
         if self.in_cmd_mode:
             return
 
-        print("Skip action triggered")
+        self._actions.append(f"skip {self.cur_file}")
+        print(self._actions[-1])
 
-    def _display_img(self, img_path):
-        img = Image.open(img_path)
-        w, h = img.size
+        self.done_count += 1
+        self._display_img(force=True)
+        self._update_status_text()
+
+    def _save(self):
+        print("Save action triggered")
+
+    def _quit(self):
+        self.root.quit()
+
+    def _display_img(self, force=False):
+        img_path = self.cur_file
+        if force:
+            self._img = Image.open(img_path)
+
+        w, h = self._img.size
         cw = self._canvas.winfo_width()
         ch = self._canvas.winfo_height()
 
@@ -235,10 +350,10 @@ class VIMageSorterApp:
 
         if scale < 1:
             new_size = (int(w * scale), int(h * scale))
-            img = img.resize(new_size, Image.LANCZOS)
+            self._img = self._img.resize(new_size, Image.LANCZOS)
             nw, nh = new_size
 
-        self._cur_img = ImageTk.PhotoImage(img)
+        self._cur_img = ImageTk.PhotoImage(self._img)
 
         self._canvas.delete("all")
         self._canvas.create_image(
@@ -254,6 +369,26 @@ class VIMageSorterApp:
         timestamp = time.ctime(os.path.getctime(img_path))
         self._created_dt_label.config(text=f"Created: {timestamp}")
         self._path_label.config(text=f"{img_path}")
+
+    def _rotate_display_img(self, reverse=False):
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+
+        if reverse:
+            self._img = self._img.rotate(90 % 360, expand=True) 
+
+        else:
+            self._img = self._img.rotate(-90 % 360, expand=True)
+
+        self._cur_img = ImageTk.PhotoImage(self._img)
+
+        self._canvas.delete("all")
+        self._canvas.create_image(
+            cw//2,
+            ch//2,
+            image=self._cur_img,
+        )
+
 
 if __name__ == "__main__":
     root = tk.Tk()
