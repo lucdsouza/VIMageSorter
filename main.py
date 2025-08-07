@@ -1,7 +1,8 @@
-import os, time
+import os, time, shutil
 import tkinter as tk
 from PIL import Image, ImageTk
 from collections import OrderedDict
+from send2trash import send2trash
 
 
 class VIMageSorterApp:
@@ -352,6 +353,27 @@ class VIMageSorterApp:
     def _save(self):
         print("Save action triggered")
 
+        for filepath, actions in self._actions.items():
+            if not actions or actions[-1] == "skip":
+                continue
+
+            if actions[-1] == "delete":
+                send2trash(filepath)
+                continue
+            
+            if "rotate" in actions:
+                angle = -90 * actions.count("rotate")
+                img = Image.open(filepath)
+                img = img.rotate(angle % 360, expand=True)
+                img.save(filepath)
+
+            if actions[-1].startswith("move"):
+                new_path = os.path.expanduser(actions[-1][4:].strip())
+                filename = os.path.basename(filepath)
+
+                shutil.move(filepath, os.path.join(new_path, filename))
+                continue
+            
     def _quit(self):
         self.root.quit()
 
