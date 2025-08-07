@@ -136,6 +136,7 @@ class VIMageSorterApp:
         self.folder_path = None
         self.files = []
         self._actions = OrderedDict()
+        self._binds = {}
 
     def _update_status_text(self):
         text = (f"Done: {self.done_count}/{self.left_count}\t\tImages: {self.image_count} | Videos: {self.video_count}")
@@ -182,6 +183,10 @@ class VIMageSorterApp:
 
         if event.char == ":":
             self._enter_cmd_mode()
+        
+        for key, value in self._binds.items():
+            if event.char == key:
+                self._move(value)
 
     def _enter_cmd_mode(self):
         self.in_cmd_mode = True
@@ -234,6 +239,9 @@ class VIMageSorterApp:
             self._update_status_text()
             self._register_action()
 
+        elif params[0] in ["bind", "b"]:
+            self._binds[params[1]] = params[2]
+
         self._exit_cmd_mode()
 
     def _on_cmd_escape(self, event):
@@ -261,7 +269,6 @@ class VIMageSorterApp:
             return
 
         print("Undo action triggered")
-        print(self.cur_file)
         if len(self._actions) == 1 and len(self._actions[self.cur_file]) == 0:
             return
 
@@ -288,7 +295,10 @@ class VIMageSorterApp:
             self._actions[self.cur_file].pop()
             self._rotate_display_img(reverse=True)
 
-        elif self._actions[self.cur_file][-1] == "delete":
+        elif self._actions[self.cur_file][-1] in ["delete", "skip"]:
+            self._actions[self.cur_file].pop()
+
+        elif self._actions[self.cur_file][-1].startswith("move"):
             self._actions[self.cur_file].pop()
 
         print(self._actions)
@@ -317,18 +327,27 @@ class VIMageSorterApp:
             self._register_action()
         
         self._update_status_text()
-        print(self.cur_file)
 
     def _skip(self, event):
         if self.in_cmd_mode:
             return
 
-        self._actions.append(f"skip {self.cur_file}")
-        print(self._actions[-1])
+        self._register_action("skip")
 
         self.done_count += 1
+        self.cur_file = self.files[self.done_count]
         self._display_img(force=True)
         self._update_status_text()
+        self._register_action()
+
+    def _move(self, new_path):
+        self._register_action(f"move {new_path}")
+
+        self.done_count += 1
+        self.cur_file = self.files[self.done_count]
+        self._display_img(force=True)
+        self._update_status_text()
+        self._register_action()
 
     def _save(self):
         print("Save action triggered")
